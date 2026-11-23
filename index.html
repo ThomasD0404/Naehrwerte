@@ -125,6 +125,16 @@ function load() { try { const r = localStorage.getItem(KEY); if (r) return JSON.
 function save() { try { localStorage.setItem(KEY, JSON.stringify(meals)); } catch (e) {} }
 let meals = load();
 
+const DKEY = "naehrwerte.dishes.v1";
+const dishOf = (p, type) => ({id: uid(), name: p[0], type, fat: p[1], sugar: p[2], protein: p[3], fiber: p[4]});
+let dishes = [];
+try {
+  const r = localStorage.getItem(DKEY);   // beim ersten Start drei Dummy-Gerichte
+  dishes = r ? JSON.parse(r) : [dishOf(POOL.meal[0], "meal"), dishOf(POOL.meal[3], "meal"), dishOf(POOL.snack[1], "snack")];
+} catch (e) {}
+function saveDishes() { try { localStorage.setItem(DKEY, JSON.stringify(dishes)); } catch (e) {} }
+function addDish(r, type) { dishes.push({id: uid(), name: r.name, type, fat: r.fat, sugar: r.sugar, protein: r.protein, fiber: r.fiber}); saveDishes(); }
+
 const PKEY = "naehrwerte.profile.v1";
 let profile = null;   // {weight, height, limits}
 try { profile = JSON.parse(localStorage.getItem(PKEY)); } catch (e) {}
@@ -135,8 +145,9 @@ const AKEY = "naehrwerte.apikey";
 const getKey = () => { try { return localStorage.getItem(AKEY) || ""; } catch (e) { return ""; } };
 const LIMITS_SYSTEM = 'Du bestimmst Orientierungsgrenzen (in Gramm) für die Bewertung von Fett, Zucker, Protein und Ballaststoffen. Für jeden Kontext (day, meal, snack) und jeden Nährstoff (fat, sugar, protein, fiber) gibt es vier aufsteigende Grenzen t1 bis t4: unter t1 sehr niedrig, t1 bis t2 niedrig, t2 bis t3 gut, t3 bis t4 hoch, ab t4 sehr hoch. Antworte ausschließlich mit JSON in exakt der Struktur der übergebenen Standardgrenzen, ohne Erklärung und ohne Markdown.';
 
-async function requestLimits(weight, height) {
-  const prompt = `Person: ${weight} kg, ${height} cm.\nStandardgrenzen für eine Person mit 70 kg und 175 cm:\n${JSON.stringify(DEFAULT_LIMITS)}\nPasse die Grenzen an diese Person an.`;
+async function requestLimits({weight, height, age, gender}) {
+  const parts = [weight && weight + " kg", height && height + " cm", age && age + " Jahre", gender].filter(Boolean);
+  const prompt = `Person: ${parts.join(", ")}. (Nicht genannte Angaben sind unbekannt.)\nStandardgrenzen für eine durchschnittliche erwachsene Person (70 kg, 175 cm):\n${JSON.stringify(DEFAULT_LIMITS)}\nPasse die Grenzen an die genannten Angaben an. Für fehlende Angaben gelten die Standardwerte.`;
   const r = await callClaude([{type: "text", text: prompt}], LIMITS_SYSTEM, 2000);
   const out = {};
   for (const ctx in DEFAULT_LIMITS) {
@@ -152,7 +163,10 @@ async function requestLimits(weight, height) {
 }
 
 /* ===== KI-Anbindung ===== */
-const MODEL = "claude-haiku-5-5";   // günstig zum Testen; für bessere Qualität z. B. "claude-sonnet-5-5"
+const MODELS = {"claude-haiku-5-5": "Haiku 5.5 (günstig)", "claude-sonnet-5-5": "Sonnet 5.5 (genauer, teurer)"};
+const MKEY = "naehrwerte.model";
+let MODEL = "claude-haiku-5-5";
+try { const m = localStorage.getItem(MKEY); if (MODELS[m]) MODEL = m; } catch (e) {}
 const IMG_MAX = 1024;               // längste Bildkante in Pixel (kleiner = billiger, ca. Breite x Höhe / 750 Tokens)
 const ANALYZE_SYSTEM = 'Du bist ein Ernährungsassistent. Schätze die Nährwerte der gesamten gezeigten bzw. beschriebenen Portion. Mengenangaben im Text haben Vorrang vor der Schätzung per Foto. Antworte ausschließlich mit JSON ohne Erklärung und ohne Markdown im Format {"name": "kurzer deutscher Name des Gerichts", "fat": Gramm, "sugar": Gramm, "protein": Gramm, "fiber": Gramm}. sugar ist der Gesamtzucker. Alle Werte sind ganze Zahlen.';
 
@@ -243,7 +257,7 @@ function viewDay(d) {
   const t = ms.length ? sum(ms) : null;
   const items = ms.map(m => `<article class="card">${ring(m, m.type)}<div class="info"><h3>${esc(m.name)}</h3>
     <p class="muted">${m.type === "snack" ? "Snack" : "Mahlzeit"}</p>${stats(m, m.type)}
-    <button class="del" data-id="${m.id}">Löschen</button></div></article>`).join("");
+    <button class="del" data-id="${m.id}">Löschen</button><button class="text-btn" data-keep="${m.id}" style="margin-left:16px;font-size:.85rem;text-decoration:none">Als Gericht speichern</button></div></article>`).join("");
   return `<a class="back" href="#/">‹ Übersicht</a><h1>${label(d)}</h1>
     <section class="card" style="margin-top:12px">${ring(t, "day", 1)}<div class="info">${t ? stats(t, "day") : '<p class="muted">Noch nichts erfasst.</p>'}</div></section>
     <h2>Mahlzeiten</h2>${items || '<p class="muted" style="margin-bottom:12px">Keine Mahlzeiten an diesem Tag.</p>'}
@@ -257,6 +271,9 @@ function viewAdd(d) {
       <label><input type="radio" name="type" value="meal" checked><span>Mahlzeit</span></label>
       <label><input type="radio" name="type" value="snack"><span>Snack</span></label>
     </div>
+    ${dishes.length ? `<section class="panel"><label class="l" for="dish">Gespeichertes Gericht</label>
+      <select class="num" id="dish"><option value="">– stattdessen Foto oder Text –</option>${dishes.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></section>` : ""}
+    <div id="input">
     <section class="panel">
       <input id="file" type="file" accept="image/*" capture="environment" hidden>
       <button type="button" class="photo-btn" id="photoBtn">Foto aufnehmen</button>
@@ -265,7 +282,7 @@ function viewAdd(d) {
     </section>
     <section class="panel"><label class="l" for="text">Beschreibung (optional)</label>
       <textarea id="text" placeholder="z. B. 200 g Spaghetti mit Tomatensoße und Parmesan"></textarea></section>
-    <button class="primary" id="go" disabled>Nährwerte berechnen</button>
+    <button class="primary" id="go" disabled>Nährwerte berechnen</button></div>
     <div class="err" id="err" hidden></div>
     <section class="panel" id="result" style="margin-top:16px" hidden aria-live="polite"></section>`;
 }
@@ -273,21 +290,31 @@ function viewAdd(d) {
 function viewProfile() {
   const p = profile || {};
   return `<a class="back" href="#/">‹ Übersicht</a><h1>Einstellungen</h1>
-    <p class="muted">Aus Gewicht und Körpergröße bestimmt die KI deine persönlichen Limits.</p><h2></h2>
+    <p class="muted">Aus diesen Angaben bestimmt die KI deine persönlichen Limits. Alle Felder sind optional, ohne Angaben gelten Standardwerte.</p><h2></h2>
     <section class="panel">
-      <label class="l" for="weight">Gewicht (kg)</label>
+      <label class="l" for="weight">Gewicht (kg, optional)</label>
       <input class="num" id="weight" type="number" inputmode="decimal" min="30" max="300" step="0.1" value="${p.weight || ""}">
-      <label class="l" for="height" style="margin-top:14px">Körpergröße (cm)</label>
+      <label class="l" for="height" style="margin-top:14px">Körpergröße (cm, optional)</label>
       <input class="num" id="height" type="number" inputmode="numeric" min="100" max="250" step="1" value="${p.height || ""}">
+      <label class="l" for="age" style="margin-top:14px">Alter (Jahre, optional)</label>
+      <input class="num" id="age" type="number" inputmode="numeric" min="10" max="110" step="1" value="${p.age || ""}">
+      <label class="l" for="gender" style="margin-top:14px">Geschlecht (optional)</label>
+      <select class="num" id="gender">${[["", "– keine Angabe –"], ["weiblich", "weiblich"], ["männlich", "männlich"], ["divers", "divers"]].map(([v, n]) => `<option value="${v}"${v === (p.gender || "") ? " selected" : ""}>${n}</option>`).join("")}</select>
     </section>
     <button class="primary" id="send">Senden</button>
     <div class="err" id="perr" hidden></div>
     <p class="muted" id="pok" style="margin-top:12px" hidden>Limits aktualisiert. Alle Ringe nutzen jetzt die neuen Werte.</p>
     <h2>KI-Zugang</h2>
-    <section class="panel"><label class="l" for="key">API-Schlüssel</label>
+    <section class="panel"><label class="l" for="model">Modell</label>
+      <select class="num" id="model" style="margin-bottom:14px">${Object.entries(MODELS).map(([id, n]) => `<option value="${id}"${id === MODEL ? " selected" : ""}>${n}</option>`).join("")}</select>
+      <label class="l" for="key">API-Schlüssel</label>
       <input class="num" id="key" type="password" autocomplete="off" placeholder="sk-ant-…" value="${esc(getKey())}">
       <button type="button" class="text-btn" id="saveKey">Schlüssel speichern</button>
-      <p class="muted" id="kok" hidden>Gespeichert (nur auf diesem Gerät).</p></section>`;
+      <p class="muted" id="kok" hidden>Gespeichert (nur auf diesem Gerät).</p></section>
+    <h2>Gespeicherte Gerichte</h2>
+    ${dishes.length ? dishes.map(x => `<div class="card" style="padding:10px 14px"><div class="info"><b>${esc(x.name)}</b>
+      <div class="muted">${x.type === "snack" ? "Snack" : "Mahlzeit"}</div></div><button class="del" data-dish="${x.id}">Löschen</button></div>`).join("")
+      : '<p class="muted">Noch keine Gerichte gespeichert.</p>'}`;
 }
 
 /* ===== Ereignisse ===== */
@@ -299,6 +326,10 @@ function bindStart() {
   };
 }
 function bindDay() {
+  app.querySelectorAll("[data-keep]").forEach(b => b.onclick = () => {
+    const m = meals.find(x => x.id === b.dataset.keep); if (!m) return;
+    addDish(m, m.type); b.textContent = "Gespeichert ✓"; b.disabled = true;
+  });
   app.querySelectorAll(".del").forEach(b => b.onclick = () => {
     if (confirm("Diese Mahlzeit löschen?")) { meals = meals.filter(m => m.id !== b.dataset.id); save(); route(); }
   });
@@ -309,17 +340,22 @@ function bindProfile() {
     try { localStorage.setItem(AKEY, $("key").value.trim()); } catch (e) {}
     $("kok").hidden = false;
   };
+  $("model").onchange = () => { MODEL = $("model").value; try { localStorage.setItem(MKEY, MODEL); } catch (e) {} };
+  app.querySelectorAll("[data-dish]").forEach(b => b.onclick = () => {
+    if (confirm("Dieses Gericht löschen?")) { dishes = dishes.filter(x => x.id !== b.dataset.dish); saveDishes(); route(); }
+  });
   $("send").onclick = async () => {
-    const w = parseFloat($("weight").value), h = parseFloat($("height").value);
+    const num = id => { const v = parseFloat($(id).value); return isNaN(v) ? null : v; };
+    const w = num("weight"), h = num("height"), age = num("age"), gender = $("gender").value;
     $("perr").hidden = true;
-    if (!(w >= 30 && w <= 300) || !(h >= 100 && h <= 250)) {
-      $("perr").textContent = "Bitte Gewicht (30–300 kg) und Körpergröße (100–250 cm) angeben.";
+    if ((w !== null && !(w >= 30 && w <= 300)) || (h !== null && !(h >= 100 && h <= 250)) || (age !== null && !(age >= 10 && age <= 110))) {
+      $("perr").textContent = "Bitte gültige Werte angeben: Gewicht 30–300 kg, Körpergröße 100–250 cm, Alter 10–110 Jahre.";
       $("perr").hidden = false; return;
     }
     $("send").disabled = true; $("send").textContent = "Wird gesendet …";
     try {
-      const limits = await requestLimits(w, h);
-      profile = {weight: w, height: h, limits}; LIMITS = limits; saveProfile();
+      const limits = (w || h || age || gender) ? await requestLimits({weight: w, height: h, age, gender}) : DEFAULT_LIMITS;
+      profile = {weight: w, height: h, age, gender, limits}; LIMITS = limits; saveProfile();
       app.innerHTML = viewProfile(); bindProfile(); document.getElementById("pok").hidden = false;
     } catch (e) {
       $("perr").textContent = "Die Anfrage ist fehlgeschlagen: " + e.message; $("perr").hidden = false;
@@ -329,9 +365,27 @@ function bindProfile() {
 }
 function bindAdd(d) {
   const $ = id => document.getElementById(id);
-  let photo = null, type = "meal";
+  let photo = null, type = "meal", dish = null;
   const stale = () => { $("result").hidden = true; };
   const upd = () => { $("go").disabled = !(photo || $("text").value.trim()); };
+  const NOTE = "Gespeichertes Gericht, keine KI-Anfrage nötig.";
+
+  function show(r, note) {
+    $("result").innerHTML = `<h2 style="margin-top:0">Nährwerte</h2><h3>${esc(r.name)}</h3>
+      <div class="row">${ring(r, type, 1)}<div class="info">${stats(r, type)}</div></div>
+      <p class="muted" style="margin-bottom:14px">${esc(note || "")}</p>
+      <button class="primary" id="save">Zum Tag hinzufügen</button>
+      ${dish ? "" : '<button class="text-btn" id="keep">Als Gericht speichern</button>'}`;
+    $("result").hidden = false;
+    $("save").onclick = () => {
+      const now = new Date();
+      meals.push(mk(d, type, d === ymd(now) ? pad(now.getHours()) + ":" + pad(now.getMinutes()) : "12:00",
+                    [r.name, r.fat, r.sugar, r.protein, r.fiber]));
+      save(); location.replace("#/tag/" + d);
+    };
+    if (!dish) $("keep").onclick = () => { addDish(r, type); $("keep").textContent = "Gericht gespeichert ✓"; $("keep").disabled = true; };
+    $("result").scrollIntoView({behavior: "smooth", block: "nearest"});
+  }
 
   $("back").onclick = () => history.length > 1 ? history.back() : (location.hash = "#/tag/" + d);
   $("photoBtn").onclick = () => $("file").click();
@@ -346,24 +400,23 @@ function bindAdd(d) {
     $("photoBtn").textContent = "Foto aufnehmen"; stale(); upd();
   };
   $("text").oninput = () => { stale(); upd(); };
-  app.querySelectorAll('input[name="type"]').forEach(r => r.onchange = () => { type = r.value; stale(); });
+  app.querySelectorAll('input[name="type"]').forEach(r => r.onchange = () => { type = r.value; dish ? show(dish, NOTE) : stale(); });
+
+  if ($("dish")) $("dish").onchange = () => {
+    dish = dishes.find(x => x.id === $("dish").value) || null;
+    $("input").hidden = !!dish;
+    if (dish) {
+      type = dish.type;
+      app.querySelector('input[name="type"][value="' + type + '"]').checked = true;
+      show(dish, NOTE);
+    } else { stale(); upd(); }
+  };
 
   $("go").onclick = async () => {
     $("err").hidden = true; $("go").disabled = true; $("go").textContent = "Wird berechnet …";
     try {
       const r = await analyzeMeal(photo, $("text").value, type);
-      $("result").innerHTML = `<h2 style="margin-top:0">Geschätzte Nährwerte</h2><h3>${esc(r.name)}</h3>
-        <div class="row">${ring(r, type, 1)}<div class="info">${stats(r, type)}</div></div>
-        <p class="muted" style="margin-bottom:14px">${esc(r.note || "")}</p>
-        <button class="primary" id="save">Zum Tag hinzufügen</button>`;
-      $("result").hidden = false;
-      $("save").onclick = () => {
-        const now = new Date();
-        meals.push(mk(d, type, d === ymd(now) ? pad(now.getHours()) + ":" + pad(now.getMinutes()) : "12:00",
-                      [r.name, r.fat, r.sugar, r.protein, r.fiber]));
-        save(); location.replace("#/tag/" + d);
-      };
-      $("result").scrollIntoView({behavior: "smooth", block: "nearest"});
+      show(r, r.note);
     } catch (e) {
       $("err").textContent = "Die Berechnung ist fehlgeschlagen: " + e.message; $("err").hidden = false;
     } finally { $("go").textContent = "Nährwerte berechnen"; upd(); }
