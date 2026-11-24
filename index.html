@@ -28,7 +28,7 @@ a.card:active{background:var(--bg)}
 .ring{width:68px;height:68px;flex:none}.ring.big{width:96px;height:96px}
 .ring path{stroke:var(--c)}
 .l-r{--c:var(--red)}.l-y{--c:var(--yellow)}.l-g{--c:var(--green)}.l-x{--c:var(--track)}
-.grid{display:grid;grid-template-areas:"f z" "b p";gap:6px 10px;margin-top:6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-top:6px}
 .cell{font-size:.85rem;line-height:1.25}
 .cell b{display:block;font-weight:600}.cell small{color:var(--muted);font-size:.8rem}
 .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--c);margin-right:6px}
@@ -48,6 +48,7 @@ textarea{width:100%;min-height:90px;padding:12px;font:inherit;color:var(--ink);b
 .del{margin-top:6px;background:none;border:none;color:var(--red);font:inherit;font-size:.85rem;font-weight:600;padding:6px 0;cursor:pointer}
 .fab{position:fixed;right:max(18px,calc(50% - 242px));bottom:calc(20px + env(safe-area-inset-bottom,0));width:60px;height:60px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:2rem;line-height:58px;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.28)}
 .row{display:flex;gap:14px;align-items:center;margin:8px 0 14px}
+.chk{display:flex;align-items:center;gap:12px;padding:8px 0;font-weight:500;cursor:pointer}.chk input{width:22px;height:22px;accent-color:var(--accent)}
 .top{display:flex;justify-content:space-between;align-items:center}.gear{font-size:1.6rem;padding:6px 10px;color:var(--muted)}
 .num{width:100%;padding:12px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:12px}
 .err{color:var(--red);font-weight:600;margin-top:10px}
@@ -60,35 +61,43 @@ textarea{width:100%;min-height:90px;padding:12px;font:inherit;color:var(--ink);b
 const LEVELS = ["sehr niedrig", "niedrig", "gut", "hoch", "sehr hoch"];
 const COLOR  = ["r", "y", "g", "y", "r"];
 const FILL   = [1 / 8, 1 / 4, 1 / 2, 3 / 4, 1];   // Füllgrad des Viertels je Stufe
-// Position im Ring (Startwinkel, im Uhrzeigersinn ab 12 Uhr) und Feld im Raster
+// Reihenfolge = Reihenfolge im Ring (im Uhrzeigersinn ab 12 Uhr). s = Kürzel im großen Ring, u = Einheit
 const NUTR = [
-  {k: "fat",     n: "Fett",          s: "F", a: 270, g: "f"},   // oben links
-  {k: "sugar",   n: "Zucker",        s: "Z", a: 0,   g: "z"},   // oben rechts
-  {k: "protein", n: "Proteine",      s: "P", a: 90,  g: "p"},   // unten rechts
-  {k: "fiber",   n: "Ballaststoffe", s: "B", a: 180, g: "b"}    // unten links
+  {k: "kcal",    n: "Kalorien",      s: "Kal", u: "kcal"},
+  {k: "carbs",   n: "Kohlenhydrate", s: "KH",  u: "g"},
+  {k: "fat",     n: "Fett",          s: "F",   u: "g"},
+  {k: "sugar",   n: "Zucker",        s: "Z",   u: "g"},
+  {k: "protein", n: "Proteine",      s: "P",   u: "g"},
+  {k: "fiber",   n: "Ballaststoffe", s: "B",   u: "g"}
 ];
 // Grenzen t1..t4 in Gramm. Stufen: <t1 sehr niedrig | t1-t2 niedrig | t2-t3 gut | t3-t4 hoch | >=t4 sehr hoch
 // Grobe Orientierungswerte (Annahmen, keine medizinische Empfehlung) – hier kannst du sie anpassen.
 const DEFAULT_LIMITS = {
-  day:   {fat: [25, 45, 90, 120], sugar: [15, 25, 50, 75], protein: [35, 55, 100, 140], fiber: [10, 20, 40, 55]},
-  meal:  {fat: [8, 15, 30, 40],   sugar: [3, 8, 17, 25],   protein: [10, 18, 35, 50],   fiber: [3, 6, 13, 18]},
-  snack: {fat: [2, 5, 12, 18],    sugar: [2, 5, 12, 20],   protein: [2, 5, 12, 20],     fiber: [1, 2, 5, 8]}
+  day:   {kcal: [1200, 1600, 2400, 3000], carbs: [100, 160, 300, 380], fat: [25, 45, 90, 120], sugar: [15, 25, 50, 75], protein: [35, 55, 100, 140], fiber: [10, 20, 40, 55]},
+  meal:  {kcal: [250, 400, 800, 1000],    carbs: [25, 45, 100, 130],   fat: [8, 15, 30, 40],    sugar: [3, 8, 17, 25],   protein: [10, 18, 35, 50],   fiber: [3, 6, 13, 18]},
+  snack: {kcal: [60, 120, 300, 450],      carbs: [5, 12, 35, 55],      fat: [2, 5, 12, 18],     sugar: [2, 5, 12, 20],   protein: [2, 5, 12, 20],     fiber: [1, 2, 5, 8]}
+};
+// ergänzt fehlende Werte älterer gespeicherter Limits durch die Standardwerte
+const withDefaults = L => {
+  const o = {};
+  for (const c in DEFAULT_LIMITS) { o[c] = {}; for (const k in DEFAULT_LIMITS[c]) o[c][k] = (L && L[c] && L[c][k]) || DEFAULT_LIMITS[c][k]; }
+  return o;
 };
 let LIMITS = DEFAULT_LIMITS;
-// Dummy-Gerichte: [Name, Fett, Zucker, Protein, Ballaststoffe] in g
+// Dummy-Gerichte: [Name, Fett, Zucker, Protein, Ballaststoffe, Kohlenhydrate] in g; Kalorien = 9*Fett + 4*Protein + 4*Kohlenhydrate
 const POOL = {
   meal: [
-    ["Haferflocken mit Beeren und Joghurt", 9, 14, 16, 8], ["Vollkornbrot mit Käse und Gurke", 14, 3, 19, 7],
-    ["Spaghetti Bolognese", 22, 10, 32, 6], ["Hähnchen mit Reis und Brokkoli", 10, 3, 42, 6],
-    ["Gemüsecurry mit Linsen", 15, 9, 17, 14], ["Pizza Salami", 34, 8, 28, 5],
-    ["Croissant mit Marmelade", 18, 22, 6, 2], ["Currywurst mit Pommes", 52, 12, 24, 5],
-    ["Lachs mit Kartoffeln und Salat", 24, 3, 36, 6], ["Linsensuppe", 6, 5, 16, 13],
-    ["Salat mit Feta", 20, 6, 14, 6]
+    ["Haferflocken mit Beeren und Joghurt", 9, 14, 16, 8, 55], ["Vollkornbrot mit Käse und Gurke", 14, 3, 19, 7, 38],
+    ["Spaghetti Bolognese", 22, 10, 32, 6, 80], ["Hähnchen mit Reis und Brokkoli", 10, 3, 42, 6, 60],
+    ["Gemüsecurry mit Linsen", 15, 9, 17, 14, 62], ["Pizza Salami", 34, 8, 28, 5, 90],
+    ["Croissant mit Marmelade", 18, 22, 6, 2, 50], ["Currywurst mit Pommes", 52, 12, 24, 5, 70],
+    ["Lachs mit Kartoffeln und Salat", 24, 3, 36, 6, 35], ["Linsensuppe", 6, 5, 16, 13, 40],
+    ["Salat mit Feta", 20, 6, 14, 6, 15]
   ],
   snack: [
-    ["Apfel", 0, 19, 1, 4], ["Handvoll Mandeln", 14, 1, 6, 3], ["Schokoriegel", 12, 24, 3, 1],
-    ["Naturjoghurt mit Nüssen", 10, 7, 9, 1], ["Proteinriegel", 8, 6, 20, 3],
-    ["Karotten mit Hummus", 8, 7, 4, 7], ["Kartoffelchips", 15, 1, 2, 2]
+    ["Apfel", 0, 19, 1, 4, 25], ["Handvoll Mandeln", 14, 1, 6, 3, 5], ["Schokoriegel", 12, 24, 3, 1, 30],
+    ["Naturjoghurt mit Nüssen", 10, 7, 9, 1, 10], ["Proteinriegel", 8, 6, 20, 3, 18],
+    ["Karotten mit Hummus", 8, 7, 4, 7, 18], ["Kartoffelchips", 15, 1, 2, 2, 14]
   ]
 };
 
@@ -104,7 +113,8 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;",
 /* ===== Daten ===== */
 const KEY = "naehrwerte.v1";
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-const mk = (date, type, time, p) => ({id: uid(), date, type, time, name: p[0], fat: p[1], sugar: p[2], protein: p[3], fiber: p[4]});
+const pv = p => ({name: p[0], fat: p[1], sugar: p[2], protein: p[3], fiber: p[4], carbs: p[5], kcal: Math.round(9 * p[1] + 4 * p[3] + 4 * p[5])});
+const mk = (date, type, time, r) => ({id: uid(), date, type, time, name: r.name, fat: r.fat, sugar: r.sugar, protein: r.protein, fiber: r.fiber, carbs: r.carbs, kcal: r.kcal});
 
 function seed() {   // Dummydaten für die letzten 14 Tage (Tag vor 5 Tagen bleibt bewusst leer)
   let s = 7;
@@ -117,7 +127,7 @@ function seed() {   // Dummydaten für die letzten 14 Tage (Tag vor 5 Tagen blei
                           : [["meal", "07:30"], ["meal", "12:30"], ["meal", "19:00"]];
     if (i && rnd() < .6) slots.push(["snack", "15:30"]);
     if (i && rnd() < .3) slots.push(["snack", "21:00"]);
-    slots.forEach(([type, time]) => out.push(mk(daysAgo(i), type, time, pick(POOL[type]))));
+    slots.forEach(([type, time]) => out.push(mk(daysAgo(i), type, time, pv(pick(POOL[type])))));
   }
   return out;
 }
@@ -126,24 +136,36 @@ function save() { try { localStorage.setItem(KEY, JSON.stringify(meals)); } catc
 let meals = load();
 
 const DKEY = "naehrwerte.dishes.v1";
-const dishOf = (p, type) => ({id: uid(), name: p[0], type, fat: p[1], sugar: p[2], protein: p[3], fiber: p[4]});
+const dishOf = (p, type) => ({id: uid(), type, ...pv(p)});
 let dishes = [];
 try {
   const r = localStorage.getItem(DKEY);   // beim ersten Start drei Dummy-Gerichte
   dishes = r ? JSON.parse(r) : [dishOf(POOL.meal[0], "meal"), dishOf(POOL.meal[3], "meal"), dishOf(POOL.snack[1], "snack")];
 } catch (e) {}
 function saveDishes() { try { localStorage.setItem(DKEY, JSON.stringify(dishes)); } catch (e) {} }
-function addDish(r, type) { dishes.push({id: uid(), name: r.name, type, fat: r.fat, sugar: r.sugar, protein: r.protein, fiber: r.fiber}); saveDishes(); }
+function addDish(r, type) { dishes.push({id: uid(), name: r.name, type, fat: r.fat, sugar: r.sugar, protein: r.protein, fiber: r.fiber, carbs: r.carbs, kcal: r.kcal}); saveDishes(); }
+// ältere Einträge ohne Kalorien/Kohlenhydrate: "keine Angabe"
+[meals, dishes].forEach(l => l.forEach(m => { if (m.carbs === undefined) m.carbs = null; if (m.kcal === undefined) m.kcal = null; }));
+
+// Anzeige-Einstellungen: welche Werte, ob Zahlen
+const VKEY = "naehrwerte.view.v1";
+let view = {show: NUTR.map(n => n.k), numbers: false};
+try {
+  const v = JSON.parse(localStorage.getItem(VKEY)), ks = ((v && v.show) || []).filter(k => NUTR.some(n => n.k === k));
+  if (ks.length) view = {show: ks, numbers: !!v.numbers};
+} catch (e) {}
+function saveView() { try { localStorage.setItem(VKEY, JSON.stringify(view)); } catch (e) {} }
+const vis = () => NUTR.filter(n => view.show.includes(n.k));
 
 const PKEY = "naehrwerte.profile.v1";
 let profile = null;   // {weight, height, limits}
 try { profile = JSON.parse(localStorage.getItem(PKEY)); } catch (e) {}
-if (profile && profile.limits) LIMITS = profile.limits;
+if (profile && profile.limits) LIMITS = withDefaults(profile.limits);
 function saveProfile() { try { localStorage.setItem(PKEY, JSON.stringify(profile)); } catch (e) {} }
 
 const AKEY = "naehrwerte.apikey";
 const getKey = () => { try { return localStorage.getItem(AKEY) || ""; } catch (e) { return ""; } };
-const LIMITS_SYSTEM = 'Du bestimmst Orientierungsgrenzen (in Gramm) für die Bewertung von Fett, Zucker, Protein und Ballaststoffen. Für jeden Kontext (day, meal, snack) und jeden Nährstoff (fat, sugar, protein, fiber) gibt es vier aufsteigende Grenzen t1 bis t4: unter t1 sehr niedrig, t1 bis t2 niedrig, t2 bis t3 gut, t3 bis t4 hoch, ab t4 sehr hoch. Antworte ausschließlich mit JSON in exakt der Struktur der übergebenen Standardgrenzen, ohne Erklärung und ohne Markdown.';
+const LIMITS_SYSTEM = 'Du bestimmst Orientierungsgrenzen für die Bewertung von Kalorien (kcal), Kohlenhydraten, Fett, Zucker, Protein und Ballaststoffen (alles außer Kalorien in Gramm). Für jeden Kontext (day, meal, snack) und jeden Nährstoff (kcal, carbs, fat, sugar, protein, fiber) gibt es vier aufsteigende Grenzen t1 bis t4: unter t1 sehr niedrig, t1 bis t2 niedrig, t2 bis t3 gut, t3 bis t4 hoch, ab t4 sehr hoch. Antworte ausschließlich mit JSON in exakt der Struktur der übergebenen Standardgrenzen, ohne Erklärung und ohne Markdown.';
 
 async function requestLimits({weight, height, age, gender}) {
   const parts = [weight && weight + " kg", height && height + " cm", age && age + " Jahre", gender].filter(Boolean);
@@ -168,7 +190,7 @@ const MKEY = "naehrwerte.model";
 let MODEL = "claude-haiku-5-5";
 try { const m = localStorage.getItem(MKEY); if (MODELS[m]) MODEL = m; } catch (e) {}
 const IMG_MAX = 1024;               // längste Bildkante in Pixel (kleiner = billiger, ca. Breite x Höhe / 750 Tokens)
-const ANALYZE_SYSTEM = 'Du bist ein Ernährungsassistent. Schätze die Nährwerte der gesamten gezeigten bzw. beschriebenen Portion. Mengenangaben im Text haben Vorrang vor der Schätzung per Foto. Antworte ausschließlich mit JSON ohne Erklärung und ohne Markdown im Format {"name": "kurzer deutscher Name des Gerichts", "fat": Gramm, "sugar": Gramm, "protein": Gramm, "fiber": Gramm}. sugar ist der Gesamtzucker. Alle Werte sind ganze Zahlen.';
+const ANALYZE_SYSTEM = 'Du bist ein Ernährungsassistent. Schätze die Nährwerte der gesamten gezeigten bzw. beschriebenen Portion. Mengenangaben im Text haben Vorrang vor der Schätzung per Foto. Antworte ausschließlich mit JSON ohne Erklärung und ohne Markdown im Format {"name": "kurzer deutscher Name des Gerichts", "kcal": Kilokalorien, "carbs": Gramm, "fat": Gramm, "sugar": Gramm, "protein": Gramm, "fiber": Gramm}. carbs sind alle Kohlenhydrate inklusive Zucker, sugar ist der Gesamtzucker. Alle Werte sind ganze Zahlen.';
 
 async function callClaude(content, system, maxTokens) {
   const key = getKey();
@@ -205,39 +227,45 @@ async function analyzeMeal(photo, text, type) {
   content.push({type: "text", text: `Art: ${type === "snack" ? "Snack" : "Mahlzeit"}\nBeschreibung: ${text.trim() || "(keine, bitte nur nach dem Foto schätzen)"}`});
   const r = await callClaude(content, ANALYZE_SYSTEM, 1000);
   const num = v => Math.max(0, Math.round(Number(v)));
-  const out = {name: String(r.name || "Mahlzeit").slice(0, 60), fat: num(r.fat), sugar: num(r.sugar), protein: num(r.protein), fiber: num(r.fiber)};
-  if ([out.fat, out.sugar, out.protein, out.fiber].some(Number.isNaN)) throw new Error("Unvollständige Antwort der KI.");
+  const out = {name: String(r.name || "Mahlzeit").slice(0, 60), fat: num(r.fat), sugar: num(r.sugar), protein: num(r.protein), fiber: num(r.fiber), carbs: num(r.carbs), kcal: num(r.kcal)};
+  if ([out.fat, out.sugar, out.protein, out.fiber, out.carbs, out.kcal].some(Number.isNaN)) throw new Error("Unvollständige Antwort der KI.");
   out.note = "KI-Schätzung, nur ungefähre Werte.";
   return out;
 }
 
 /* ===== Darstellung ===== */
-const level = (v, t) => t.filter(x => v >= x).length;
-const sum = list => NUTR.reduce((o, n) => (o[n.k] = list.reduce((a, m) => a + m[n.k], 0), o), {});
+const level = (v, t) => v == null ? -1 : t.filter(x => v >= x).length;
+const cls = lv => lv < 0 ? "x" : COLOR[lv];
+const sum = list => NUTR.reduce((o, n) => {
+  const v = list.map(m => m[n.k]).filter(x => x != null);
+  o[n.k] = v.length ? v.reduce((a, b) => a + b, 0) : null;
+  return o;
+}, {});
 
 function ring(vals, ctx, big) {
-  const r = 38, gap = 5;
+  const r = 38, vs = vis(), N = vs.length, span = 360 / N, gap = 6;
   const pt = a => { const t = a * Math.PI / 180; return (50 + r * Math.sin(t)).toFixed(2) + " " + (50 - r * Math.cos(t)).toFixed(2); };
   let svg = "", desc = [];
-  NUTR.forEach(n => {
-    const a1 = n.a + gap / 2, a2 = n.a + 90 - gap / 2;
+  vs.forEach((n, i) => {
+    const a1 = i * span + gap / 2, a2 = (i + 1) * span - gap / 2;
     const lv = vals ? level(vals[n.k], LIMITS[ctx][n.k]) : -1;
-    const arc = (x, y, c) => `<path class="${c}" d="M${pt(x)} A${r} ${r} 0 0 1 ${pt(y)}" fill="none" stroke-width="14"/>`;
-    svg += arc(a1, a2, "l-x");                                    // leere Spur
-    if (lv >= 0) svg += arc(a1, a1 + (a2 - a1) * FILL[lv], "l-" + COLOR[lv]);   // gefüllter Teil
+    const arc = (x, y, c) => `<path class="${c}" d="M${pt(x)} A${r} ${r} 0 ${y - x > 180 ? 1 : 0} 1 ${pt(y)}" fill="none" stroke-width="14"/>`;
+    svg += arc(a1, a2, "l-x");
+    if (lv >= 0) svg += arc(a1, a1 + (a2 - a1) * FILL[lv], "l-" + COLOR[lv]);
     if (big) {
       const m = (a1 + a2) / 2 * Math.PI / 180, q = 20;
-      svg += `<text x="${(50 + q * Math.sin(m)).toFixed(1)}" y="${(50 - q * Math.cos(m)).toFixed(1)}" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="700" style="fill:var(--muted)">${n.s}</text>`;
+      svg += `<text x="${(50 + q * Math.sin(m)).toFixed(1)}" y="${(50 - q * Math.cos(m)).toFixed(1)}" text-anchor="middle" dominant-baseline="central" font-size="${N > 4 ? 8 : 10}" font-weight="700" style="fill:var(--muted)">${n.s}</text>`;
     }
-    desc.push(n.n + (lv < 0 ? ": keine Daten" : " " + LEVELS[lv]));
+    desc.push(n.n + ": " + (lv < 0 ? "keine Angabe" : LEVELS[lv]));
   });
   return `<svg class="ring${big ? " big" : ""}" viewBox="0 0 100 100" role="img" aria-label="${desc.join(", ")}">${svg}</svg>`;
 }
 
 function stats(vals, ctx) {
-  return `<div class="grid">` + NUTR.map(n => {
+  return `<div class="grid">` + vis().map(n => {
     const v = vals[n.k], lv = level(v, LIMITS[ctx][n.k]);
-    return `<div class="cell" style="grid-area:${n.g}"><b><i class="dot l-${COLOR[lv]}"></i>${n.n}</b><small>${LEVELS[lv]}</small></div>`;
+    const t = lv < 0 ? "keine Angabe" : LEVELS[lv] + (view.numbers ? " · " + v + " " + n.u : "");
+    return `<div class="cell"><b><i class="dot l-${cls(lv)}"></i>${n.n}</b><small>${t}</small></div>`;
   }).join("") + `</div>`;
 }
 
@@ -304,6 +332,11 @@ function viewProfile() {
     <button class="primary" id="send">Senden</button>
     <div class="err" id="perr" hidden></div>
     <p class="muted" id="pok" style="margin-top:12px" hidden>Limits aktualisiert. Alle Ringe nutzen jetzt die neuen Werte.</p>
+    <h2>Anzeige</h2>
+    <section class="panel">
+      ${NUTR.map(n => `<label class="chk"><input type="checkbox" data-show="${n.k}"${view.show.includes(n.k) ? " checked" : ""}>${n.n}</label>`).join("")}
+      <label class="chk" style="margin-top:6px;padding-top:14px;border-top:1px solid var(--line)"><input type="checkbox" id="numbers"${view.numbers ? " checked" : ""}>Zahlenwerte anzeigen</label>
+    </section>
     <h2>KI-Zugang</h2>
     <section class="panel"><label class="l" for="model">Modell</label>
       <select class="num" id="model" style="margin-bottom:14px">${Object.entries(MODELS).map(([id, n]) => `<option value="${id}"${id === MODEL ? " selected" : ""}>${n}</option>`).join("")}</select>
@@ -340,6 +373,12 @@ function bindProfile() {
     try { localStorage.setItem(AKEY, $("key").value.trim()); } catch (e) {}
     $("kok").hidden = false;
   };
+  app.querySelectorAll("[data-show]").forEach(c => c.onchange = () => {
+    const ks = [...app.querySelectorAll("[data-show]")].filter(x => x.checked).map(x => x.dataset.show);
+    if (!ks.length) { c.checked = true; return; }   // mindestens ein Wert bleibt sichtbar
+    view.show = ks; saveView();
+  });
+  $("numbers").onchange = () => { view.numbers = $("numbers").checked; saveView(); };
   $("model").onchange = () => { MODEL = $("model").value; try { localStorage.setItem(MKEY, MODEL); } catch (e) {} };
   app.querySelectorAll("[data-dish]").forEach(b => b.onclick = () => {
     if (confirm("Dieses Gericht löschen?")) { dishes = dishes.filter(x => x.id !== b.dataset.dish); saveDishes(); route(); }
@@ -380,7 +419,7 @@ function bindAdd(d) {
     $("save").onclick = () => {
       const now = new Date();
       meals.push(mk(d, type, d === ymd(now) ? pad(now.getHours()) + ":" + pad(now.getMinutes()) : "12:00",
-                    [r.name, r.fat, r.sugar, r.protein, r.fiber]));
+                    r));
       save(); location.replace("#/tag/" + d);
     };
     if (!dish) $("keep").onclick = () => { addDish(r, type); $("keep").textContent = "Gericht gespeichert ✓"; $("keep").disabled = true; };
