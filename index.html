@@ -49,6 +49,7 @@ textarea{width:100%;min-height:90px;padding:12px;font:inherit;color:var(--ink);b
 .fab{position:fixed;right:max(18px,calc(50% - 242px));bottom:calc(20px + env(safe-area-inset-bottom,0));width:60px;height:60px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:2rem;line-height:58px;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.28)}
 .row{display:flex;gap:14px;align-items:center;margin:8px 0 14px}
 .chk{display:flex;align-items:center;gap:12px;padding:8px 0;font-weight:500;cursor:pointer}.chk input{width:22px;height:22px;accent-color:var(--accent)}
+.cmt{margin:10px 0 0;padding-left:10px;border-left:3px solid var(--accent);font-size:.9rem;line-height:1.4}
 .top{display:flex;justify-content:space-between;align-items:center}.gear{font-size:1.6rem;padding:6px 10px;color:var(--muted)}
 .num{width:100%;padding:12px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:12px}
 .err{color:var(--red);font-weight:600;margin-top:10px}
@@ -114,7 +115,7 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;",
 const KEY = "naehrwerte.v1";
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const pv = p => ({name: p[0], fat: p[1], sugar: p[2], protein: p[3], fiber: p[4], carbs: p[5], kcal: Math.round(9 * p[1] + 4 * p[3] + 4 * p[5])});
-const mk = (date, type, time, r) => ({id: uid(), date, type, time, name: r.name, fat: r.fat, sugar: r.sugar, protein: r.protein, fiber: r.fiber, carbs: r.carbs, kcal: r.kcal});
+const mk = (date, type, time, r) => ({id: uid(), date, type, time, name: r.name, fat: r.fat, sugar: r.sugar, protein: r.protein, fiber: r.fiber, carbs: r.carbs, kcal: r.kcal, comment: r.comment || ""});
 
 function seed() {   // Dummydaten für die letzten 14 Tage (Tag vor 5 Tagen bleibt bewusst leer)
   let s = 7;
@@ -143,7 +144,7 @@ try {
   dishes = r ? JSON.parse(r) : [dishOf(POOL.meal[0], "meal"), dishOf(POOL.meal[3], "meal"), dishOf(POOL.snack[1], "snack")];
 } catch (e) {}
 function saveDishes() { try { localStorage.setItem(DKEY, JSON.stringify(dishes)); } catch (e) {} }
-function addDish(r, type) { dishes.push({id: uid(), name: r.name, type, fat: r.fat, sugar: r.sugar, protein: r.protein, fiber: r.fiber, carbs: r.carbs, kcal: r.kcal}); saveDishes(); }
+function addDish(r, type) { dishes.push({id: uid(), name: r.name, type, fat: r.fat, sugar: r.sugar, protein: r.protein, fiber: r.fiber, carbs: r.carbs, kcal: r.kcal, comment: r.comment || ""}); saveDishes(); }
 // ältere Einträge ohne Kalorien/Kohlenhydrate: "keine Angabe"
 [meals, dishes].forEach(l => l.forEach(m => { if (m.carbs === undefined) m.carbs = null; if (m.kcal === undefined) m.kcal = null; }));
 
@@ -190,7 +191,7 @@ const MKEY = "naehrwerte.model";
 let MODEL = "claude-haiku-5-5";
 try { const m = localStorage.getItem(MKEY); if (MODELS[m]) MODEL = m; } catch (e) {}
 const IMG_MAX = 1024;               // längste Bildkante in Pixel (kleiner = billiger, ca. Breite x Höhe / 750 Tokens)
-const ANALYZE_SYSTEM = 'Du bist ein Ernährungsassistent. Schätze die Nährwerte der gesamten gezeigten bzw. beschriebenen Portion. Mengenangaben im Text haben Vorrang vor der Schätzung per Foto. Antworte ausschließlich mit JSON ohne Erklärung und ohne Markdown im Format {"name": "kurzer deutscher Name des Gerichts", "kcal": Kilokalorien, "carbs": Gramm, "fat": Gramm, "sugar": Gramm, "protein": Gramm, "fiber": Gramm}. carbs sind alle Kohlenhydrate inklusive Zucker, sugar ist der Gesamtzucker. Alle Werte sind ganze Zahlen.';
+const ANALYZE_SYSTEM = 'Du bist ein Ernährungsassistent. Schätze die Nährwerte der gesamten gezeigten bzw. beschriebenen Portion. Mengenangaben im Text haben Vorrang vor der Schätzung per Foto. Antworte ausschließlich mit JSON ohne Erklärung und ohne Markdown im Format {"name": "kurzer deutscher Name des Gerichts", "kcal": Kilokalorien, "carbs": Gramm, "fat": Gramm, "sugar": Gramm, "protein": Gramm, "fiber": Gramm, "comment": "Kurzbewertung"}. carbs sind alle Kohlenhydrate inklusive Zucker, sugar ist der Gesamtzucker. Alle Werte außer name und comment sind ganze Zahlen. Der comment ist eine sachliche, freundliche Bewertung der Mahlzeit auf Deutsch in 1 bis 2 Sätzen (maximal 220 Zeichen). Er geht auf die Nährwerte ein (Energie, Kohlenhydrate, Fett, Zucker, Eiweiß, Ballaststoffe) und nennt, wenn sinnvoll, eine kurze Ergänzung.';
 
 async function callClaude(content, system, maxTokens) {
   const key = getKey();
@@ -227,7 +228,7 @@ async function analyzeMeal(photo, text, type) {
   content.push({type: "text", text: `Art: ${type === "snack" ? "Snack" : "Mahlzeit"}\nBeschreibung: ${text.trim() || "(keine, bitte nur nach dem Foto schätzen)"}`});
   const r = await callClaude(content, ANALYZE_SYSTEM, 1000);
   const num = v => Math.max(0, Math.round(Number(v)));
-  const out = {name: String(r.name || "Mahlzeit").slice(0, 60), fat: num(r.fat), sugar: num(r.sugar), protein: num(r.protein), fiber: num(r.fiber), carbs: num(r.carbs), kcal: num(r.kcal)};
+  const out = {name: String(r.name || "Mahlzeit").slice(0, 60), fat: num(r.fat), sugar: num(r.sugar), protein: num(r.protein), fiber: num(r.fiber), carbs: num(r.carbs), kcal: num(r.kcal), comment: String(r.comment || "").slice(0, 300)};
   if ([out.fat, out.sugar, out.protein, out.fiber, out.carbs, out.kcal].some(Number.isNaN)) throw new Error("Unvollständige Antwort der KI.");
   out.note = "KI-Schätzung, nur ungefähre Werte.";
   return out;
@@ -284,7 +285,7 @@ function viewDay(d) {
   const ms = meals.filter(m => m.date === d).sort((a, b) => a.time.localeCompare(b.time));
   const t = ms.length ? sum(ms) : null;
   const items = ms.map(m => `<article class="card">${ring(m, m.type)}<div class="info"><h3>${esc(m.name)}</h3>
-    <p class="muted">${m.type === "snack" ? "Snack" : "Mahlzeit"}</p>${stats(m, m.type)}
+    <p class="muted">${m.type === "snack" ? "Snack" : "Mahlzeit"}</p>${stats(m, m.type)}${m.comment ? `<p class="cmt">${esc(m.comment)}</p>` : ""}
     <button class="del" data-id="${m.id}">Löschen</button><button class="text-btn" data-keep="${m.id}" style="margin-left:16px;font-size:.85rem;text-decoration:none">Als Gericht speichern</button></div></article>`).join("");
   return `<a class="back" href="#/">‹ Übersicht</a><h1>${label(d)}</h1>
     <section class="card" style="margin-top:12px">${ring(t, "day", 1)}<div class="info">${t ? stats(t, "day") : '<p class="muted">Noch nichts erfasst.</p>'}</div></section>
@@ -412,7 +413,8 @@ function bindAdd(d) {
   function show(r, note) {
     $("result").innerHTML = `<h2 style="margin-top:0">Nährwerte</h2><h3>${esc(r.name)}</h3>
       <div class="row">${ring(r, type, 1)}<div class="info">${stats(r, type)}</div></div>
-      <p class="muted" style="margin-bottom:14px">${esc(note || "")}</p>
+      ${r.comment ? `<p class="cmt">${esc(r.comment)}</p>` : ""}
+      <p class="muted" style="margin:10px 0 14px">${esc(note || "")}</p>
       <button class="primary" id="save">Zum Tag hinzufügen</button>
       ${dish ? "" : '<button class="text-btn" id="keep">Als Gericht speichern</button>'}`;
     $("result").hidden = false;
